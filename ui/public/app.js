@@ -74,6 +74,11 @@ const time = new Intl.DateTimeFormat("en-IN", {
   minute: "2-digit",
   second: "2-digit",
 })
+const istHour = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Kolkata",
+  hour: "2-digit",
+  hourCycle: "h23",
+})
 const axisTime = new Intl.DateTimeFormat("en-IN", {
   timeZone: "Asia/Kolkata",
   day: "2-digit",
@@ -639,6 +644,7 @@ function renderPositions(payload) {
 }
 
 async function refreshPositions() {
+  if (Number(istHour.format(new Date())) >= 15) return
   if (positionsRequestPending) return
   if (!control?.auth?.tokenPresent) {
     elements.positionsSummary.textContent = "AutoLogin required"
