@@ -1,0 +1,11 @@
+.env
+.env.production
+
+node_modules/
+db/
+csv/
+reports/
+csv/
+package-lock.json
+*.log
+.DS_Store

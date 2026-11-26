@@ -1,0 +1,147 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="FYERS live depth strategy and one-minute candle dashboard" />
+    <title>Trading Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <main>
+        <section class="control-bar" aria-label="Market controls">
+          <div class="actions">
+            <button class="action-button" id="autoLoginButton" type="button">
+              <span class="step">1</span><span><strong>AutoLogin</strong><small id="authLabel">Session</small></span>
+            </button>
+            <button class="action-button" id="preCandlesButton" type="button">
+              <span class="step">2</span><span><strong>Fetch Pre Candles</strong><small id="historyLabel">30 days - 1 minute</small></span>
+            </button>
+            <button class="action-button primary" id="startServerButton" type="button">
+              <span class="step">3</span><span><strong id="serverActionLabel">Start Server</strong><small id="serverLabel">Price + depth streams</small></span>
+            </button>
+            <section class="capture-statuses" aria-label="Live capture status">
+              <div class="capture-status" data-state="stopped" id="captureServerStatus">
+                <span class="capture-dot" aria-hidden="true"></span>
+                <span class="capture-copy"><strong>Server</strong><small id="captureServerMessage">Market stream is stopped</small></span>
+              </div>
+              <div class="capture-status" data-state="stopped" id="captureDepthStatus">
+                <span class="capture-dot" aria-hidden="true"></span>
+                <span class="capture-copy"><strong>Market depth</strong><small id="captureDepthMessage">Waiting for server start</small></span>
+              </div>
+              <div class="capture-status" data-state="stopped" id="captureCandleStatus">
+                <span class="capture-dot" aria-hidden="true"></span>
+                <span class="capture-copy"><strong>Stock candles - 1 min</strong><small id="captureCandleMessage">Waiting for server start</small></span>
+              </div>
+            </section>
+          </div>
+          <div class="status-group">
+            <div class="cutoff-control">
+              <label for="cutoffTimeInput">Analysis cutoff</label>
+              <div><input id="cutoffTimeInput" type="time" min="09:16" max="15:30" step="60" aria-describedby="cutoffMode" /><button id="cutoffLiveButton" type="button">Current</button></div>
+              <small id="cutoffMode">Choose time and press Enter, or use Current</small>
+            </div>
+            <div class="live-status-stack">
+              <!-- <div class="connection-chip" data-state="stopped" id="connectionChip">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span id="connectionText">Market stream stopped</span>
+              </div> -->
+              <small id="databaseSize">db/ size: calculating...</small>
+              <small id="liveTime">Live time: --:--:-- IST</small>
+              <div class="mode-badge" id="orderMode">Order mode: </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="workspace" aria-label="Trading workspace">
+          <section class="panel positions-panel">
+            <div class="panel-heading positions-heading">
+              <div>
+                <div class="positions-heading-title">
+                  <h2>Positions</h2>
+                  <strong id="positionsTotal">₹0.00</strong>
+                </div>
+                <p id="positionsSummary">Waiting for FYERS positions…</p>
+              </div>
+            </div>
+            <div class="positions-list" id="positionsList" aria-live="polite">
+              <p class="positions-empty">No open positions</p>
+            </div>
+          </section>
+
+          <section class="panel signal-scanners-panel" aria-label="Live signal scanners">
+            <div class="signal-scanner" id="askAbsorptionSignals" aria-live="polite">
+              <header><div><h2>Ask absorption</h2><small>Volume · through 09:45 IST</small></div><small class="signal-scanner-status">Waiting for scan…</small></header>
+              <div class="signal-side-columns">
+                <section><h3><span>BUY <span data-count="buy">0</span></span><button class="signal-copy-button" data-copy-side="buy" type="button" aria-label="Copy BUY stocks" title="Copy BUY stocks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M5 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/></svg></button></h3><div data-side="buy" class="signal-list"></div></section>
+                <section><h3><span>SELL <span data-count="sell">0</span></span><button class="signal-copy-button" data-copy-side="sell" type="button" aria-label="Copy SELL stocks" title="Copy SELL stocks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M5 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/></svg></button></h3><div data-side="sell" class="signal-list"></div></section>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel signal-scanners-panel" aria-labelledby="manualCandleDepthTitle">
+            <div class="signal-scanner" id="manualCandleDepthSignals">
+              <header>
+                <div><h2 id="manualCandleDepthTitle">Candle + depth scanner</h2><small class="signal-scanner-status" role="status">Ready for manual scan</small></div>
+              </header>
+              <div class="cutoff-control scanner-cutoff-control">
+                <label for="manualCandleDepthCutoff">Scan cutoff (IST)</label>
+                <div><input id="manualCandleDepthCutoff" type="time" min="09:16" max="15:30" step="60" aria-describedby="manualCandleDepthCutoffMode" /><button id="manualCandleDepthCurrent" type="button" data-active="true" title="Run scan using the entered cutoff or latest completed candle">Current</button></div>
+                <small id="manualCandleDepthCutoffMode">Blank uses the latest completed candle</small>
+              </div>
+              <div class="signal-side-columns">
+                <section><h3><span>BUY <span data-count="buy">0</span></span><button class="signal-copy-button" data-copy-side="buy" type="button" aria-label="Copy BUY stocks" title="Copy BUY stocks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M5 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/></svg></button></h3><div data-side="buy" class="signal-list"></div></section>
+                <section><h3><span>SELL <span data-count="sell">0</span></span><button class="signal-copy-button" data-copy-side="sell" type="button" aria-label="Copy SELL stocks" title="Copy SELL stocks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M5 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/></svg></button></h3><div data-side="sell" class="signal-list"></div></section>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel chart-panel">
+            <div class="chart-heading">
+              <div>
+                <!-- <p class="eyebrow">1 MINUTE - LAST 360</p> -->
+                <div class="chart-title"><h2 id="chartSymbol">Select a stock</h2><span id="chartPrice"></span><span id="chartChange"></span></div>
+                <p id="chartSubtitle">Click any symbol to open its stored and live candles.</p>
+              </div>
+              <div class="directional-shares" id="directionalShares" aria-live="polite">
+                <span class="directional-label">Opening direction</span>
+                <small class="directional-progress">Waiting for scan...</small>
+                <table class="directional-table">
+                  <thead><tr><th>Window</th><th>Bullish</th><th>Bearish</th><th>Difference</th></tr></thead>
+                  <tbody>
+                    <tr data-window="opening"><th data-opening-window>09:15–now</th><td>—</td><td>—</td><td>—</td></tr>
+                    <tr data-window="last-fifteen"><th>Last 15m</th><td>—</td><td>—</td><td>—</td></tr>
+                    <tr data-window="last-five"><th>Last 5m</th><td>—</td><td>—</td><td>—</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div class="chart-wrap" id="chartWrap">
+              <canvas id="candleChart" aria-label="One-minute candlestick chart with Positive Volume Index"></canvas>
+              <div class="chart-empty" id="chartEmpty">Choose a stock to view its chart.</div>
+            </div>
+            <!-- <div class="chart-legend"><span><i class="legend-up"></i>Up candle</span><span><i class="legend-down"></i>Down candle</span><span><i class="legend-live"></i>Live minute</span></div> -->
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script type="module" src="/app.js"></script>
+  <a
+    id="capture-log-link"
+    href="/error-logs.html"
+    target="_blank"
+    rel="noopener"
+    title="Open socket capture logs"
+    style="display:inline-flex;align-items:center;justify-content:center;margin-left:7px;padding:5px 8px;border:1px solid #2d7468;border-radius:7px;background:#10251f;color:#7ee7ce;font:700 10px/1 system-ui;text-decoration:none;white-space:nowrap"
+  >Logs</a>
+  <script src="/dashboard-log-link.js" defer></script>
+</body>
+</html>
+
