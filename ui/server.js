@@ -332,6 +332,9 @@ async function refreshDirectionalShares() {
     if (cutoffRevision !== directionalSharesCutoffRevision) return
     const byBehaviour = new Map(result.table.map((row) => [row.Behaviour, row]))
     const total = byBehaviour.get("TOTAL (sum of differences)")
+    const nifty50Total = result.nifty50Table?.find(
+      (row) => row.Behaviour === "TOTAL (sum of differences)",
+    )
     const lastFiveTotal = result.lastFiveTable?.find(
       (row) => row.Behaviour === "TOTAL (sum of differences)",
     )
@@ -347,6 +350,10 @@ async function refreshDirectionalShares() {
       data: {
         cutoffTime: result.cutoffTime,
         analyzed: result.analyzed,
+        nifty50Analyzed: result.nifty50Analyzed || 0,
+        nifty50Bullish: nifty50Total?.Bullish || "—",
+        nifty50Bearish: nifty50Total?.Bearish || "—",
+        nifty50Difference: nifty50Total?.Difference || "—",
         bullish: total.Bullish,
         bearish: total.Bearish,
         difference: total.Difference,

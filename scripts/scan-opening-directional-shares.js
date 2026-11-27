@@ -4,7 +4,7 @@ import path from 'node:path'
 const root = process.cwd(), minuteMs = 60_000
 const parseArgs = argv => { const out = {}; for (let i = 0; i < argv.length; i++) if (argv[i].startsWith('--')) { const [key, inline] = argv[i].slice(2).split('=', 2); out[key] = inline ?? argv[++i] } return out }
 const args = parseArgs(process.argv.slice(2))
-if (!args['cutoff-datetime']) throw new Error('Usage: node scripts/scan-opening-directional-shares.js --cutoff-datetime YYYY-MM-DDTHH:mm [--symbols "NSE:AAA-EQ,..."] [--min-depth-minutes 3]')
+if (!args['cutoff-datetime']) throw new Error('Usage: node scripts/scan-opening-directional-shares.js --cutoff-datetime YYYY-MM-DDTHH:mm [--symbols "NSE:AAA-EQ,..."] [--min-depth-minutes 3] [--ignore-volume-rank=true]')
 const input = String(args['cutoff-datetime'])
 const cutoffAt = Date.parse(/[zZ]$|[+-]\d\d:\d\d$/.test(input) ? input : input + '+05:30')
 if (!Number.isFinite(cutoffAt)) throw new Error('Invalid --cutoff-datetime. Use IST, for example 2026-11-19T09:20')
@@ -13,11 +13,14 @@ const date = ist(cutoffAt).slice(0, 10), cutoffTime = ist(cutoffAt).slice(11, 16
 const startAt = Date.parse(date + 'T09:15:00+05:30')
 if (cutoffAt <= startAt) throw new Error('Cutoff must be after 09:15 IST.')
 const minimumDepthMinutes = Math.max(2, Number(args['min-depth-minutes'] ?? 3))
+const ignoreVolumeRank = args['ignore-volume-rank'] === 'true'
 const normalize = value => String(value).replace(/\s+/g, '').replace(/^NSE:/i, '').replace(/-EQ$/i, '').replace(/^TVSMOTORS$/i, 'TVSMOTOR').toUpperCase()
 const depthRoot = path.join(root, 'db', 'cash-depth', date)
 if (!fs.existsSync(depthRoot)) throw new Error('Missing depth directory: ' + depthRoot)
 const requested = args.symbols ? [...new Set(String(args.symbols).split(',').map(normalize).filter(Boolean))] : null
 const symbols = requested ?? fs.readdirSync(depthRoot, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => normalize(entry.name)).sort()
+// NSE Indices constituent file published 2026-10-28.
+const nifty50Symbols = new Set(['ADANIENT', 'ADANIPORTS', 'APOLLOHOSP', 'ASIANPAINT', 'AXISBANK', 'BSE', 'BAJAJ-AUTO', 'BAJFINANCE', 'BAJAJFINSV', 'BEL', 'BHARTIARTL', 'CIPLA', 'COALINDIA', 'DRREDDY', 'EICHERMOT', 'ETERNAL', 'GRASIM', 'HCLTECH', 'HDFCBANK', 'HDFCLIFE', 'HINDALCO', 'HINDUNILVR', 'ICICIBANK', 'ITC', 'INFY', 'INDIGO', 'JSWSTEEL', 'JIOFIN', 'KOTAKBANK', 'LT', 'M&M', 'MARUTI', 'MAXHEALTH', 'NTPC', 'NESTLEIND', 'ONGC', 'POWERGRID', 'RELIANCE', 'SBILIFE', 'SHRIRAMFIN', 'SBIN', 'SUNPHARMA', 'TCS', 'TATACONSUM', 'TMPV', 'TATASTEEL', 'TECHM', 'TITAN', 'TRENT', 'ULTRACEMCO'])
 const pct = (to, from) => 100 * (to / from - 1)
 
 function candles(symbol) {
@@ -73,7 +76,7 @@ function depth(symbol) {
   }
 }
 
-const rows = [], skipped = [], volumeEligible = []
+const rows = [], nifty50Rows = [], skipped = [], volumeEligible = []
 for (const [index, symbol] of symbols.entries()) {
   process.stdout.write('\r\x1b[2KScanning [' + (index + 1) + '/' + symbols.length + '] ' + symbol + '...')
   const history = candles(symbol)
@@ -81,13 +84,18 @@ for (const [index, symbol] of symbols.entries()) {
   const candle = candleFeature(history, date)
   const priorDates = [...new Set(history.filter(row => row.date < date).map(row => row.date))].sort().slice(-10)
   const prior = priorDates.map(sessionDate => candleFeature(history, sessionDate)).filter(Boolean)
-  if (!candle || prior.length !== 10) { skipped.push({ symbol, reason: !candle ? 'missing current candles' : 'fewer than ten prior volume windows' }); continue }
-  const volumeRank = 1 + prior.filter(row => row.averageVolume > candle.averageVolume).length
-  if (volumeRank > 3) { skipped.push({ symbol, reason: 'today volume rank above 3', volumeRank }); continue }
-  volumeEligible.push({ symbol, volumeRank, averageVolume: candle.averageVolume })
+  if (!candle) { skipped.push({ symbol, reason: 'missing current candles' }); continue }
+  const volumeRank = prior.length === 10 ? 1 + prior.filter(row => row.averageVolume > candle.averageVolume).length : null
+  const mainEligible = ignoreVolumeRank || (prior.length === 10 && volumeRank <= 3)
+  if (!mainEligible) skipped.push({ symbol, reason: prior.length !== 10 ? 'fewer than ten prior volume windows' : 'today volume rank above 3', volumeRank })
+  if (mainEligible) volumeEligible.push({ symbol, volumeRank, averageVolume: candle.averageVolume })
+  const nifty50Eligible = nifty50Symbols.has(symbol)
+  if (!mainEligible) continue
   const book = depth(symbol)
-  if (!book) { skipped.push({ symbol, reason: 'incomplete depth' }); continue }
-  rows.push({ symbol, candle, book, lastFiveCandle: candleFeature(history, date, 5), lastFiveBook: book.recent5, lastFifteenCandle: candleFeature(history, date, 15), lastFifteenBook: book.recent15, volumeRank })
+  if (!book) { if (mainEligible) skipped.push({ symbol, reason: 'incomplete depth' }); continue }
+  const row = { symbol, candle, book, lastFiveCandle: candleFeature(history, date, 5), lastFiveBook: book.recent5, lastFifteenCandle: candleFeature(history, date, 15), lastFifteenBook: book.recent15, volumeRank }
+  rows.push(row)
+  if (nifty50Eligible) nifty50Rows.push(row)
 }
 process.stdout.write('\r\x1b[2K')
 if (!rows.length) throw new Error('No volume-rank-eligible stocks have both candle data and at least ' + minimumDepthMinutes + ' observed depth minutes in this window.')
@@ -114,13 +122,14 @@ const buildTable = (sourceRows, feature = '') => {
   return table
 }
 const table = buildTable(rows)
+const nifty50Table = buildTable(nifty50Rows)
 const lastFiveRows = rows.filter(row => row.lastFiveCandle?.candles >= 2 && row.lastFiveBook)
 const lastFiveTable = buildTable(lastFiveRows, 'lastFive')
 const lastFifteenRows = rows.filter(row => row.lastFifteenCandle?.candles >= 2 && row.lastFifteenBook)
 const lastFifteenTable = buildTable(lastFifteenRows, 'lastFifteen')
 const eligibleStocks = rows
   .map(row => ({ stock: row.symbol, volumeRank: row.volumeRank, averageVolume: row.candle.averageVolume }))
-  .sort((left, right) => left.volumeRank - right.volumeRank || right.averageVolume - left.averageVolume || left.stock.localeCompare(right.stock))
+  .sort((left, right) => (left.volumeRank ?? 0) - (right.volumeRank ?? 0) || right.averageVolume - left.averageVolume || left.stock.localeCompare(right.stock))
 const rowsBySymbol = new Map(rows.map(row => [row.symbol, row]))
 const classify = (bullish, bearish) => bullish ? 'BULLISH' : bearish ? 'BEARISH' : 'NEUTRAL'
 const signedPct = value => `${value > 0 ? '+' : ''}${value.toFixed(3)}%`
@@ -130,7 +139,7 @@ const eligibleStocksTable = eligibleStocks.map(stock => {
   const midpointReturn = row.book.midpointReturnPct
   return {
     Stock: stock.stock,
-    'Volume rank': stock.volumeRank,
+    'Volume rank': stock.volumeRank ?? 'ignored',
     'Average volume': +stock.averageVolume.toFixed(1),
     'EMA structure': classify(row.candle.emaUp === true, row.candle.emaUp === false),
     'Five-candle return': `${classify(priceReturn > 0, priceReturn < 0)} (${signedPct(priceReturn)})`,
@@ -141,14 +150,15 @@ const eligibleStocksTable = eligibleStocks.map(stock => {
 })
 const windowSummary = (label, sourceTable) => {
   const total = sourceTable.find(row => row.Behaviour === 'TOTAL (sum of differences)')
-  return { ...total, Behaviour: label }
+  return { Window: label, Bullish: total.Bullish, Bearish: total.Bearish, Difference: total.Difference }
 }
 const behaviourTable = [
-  ...table.filter(row => row.Behaviour !== 'AVERAGE SHARE / NET DIFFERENCE'),
-  windowSummary('15m', lastFifteenTable),
-  windowSummary('5m', lastFiveTable),
+  windowSummary(`Nifty50 09:15-${cutoffTime}`, nifty50Table),
+  windowSummary(`All 09:15-${cutoffTime}`, table),
+  windowSummary('Last 15m', lastFifteenTable),
+  windowSummary('Last 5m', lastFiveTable),
 ]
-const report = { date, startTime: '09:15', cutoffTime, cutoffExclusive: true, analyzed: rows.length, lastFiveAnalyzed: lastFiveRows.length, lastFifteenAnalyzed: lastFifteenRows.length, requested: symbols.length, volumeEligible: volumeEligible.length, skipped: skipped.length, minimumDepthMinutes, rules: { volumeUniverse: 'Only stocks whose current average one-minute volume from 09:15 to cutoff ranks 1, 2, or 3 against the same window in the prior ten sessions.', depthPersistence: 'At least 75% of observed minute-to-minute midpoint changes point in the side direction, with no move through the opening midpoint against that direction.' }, eligibleStocks, table, lastFiveTable, lastFifteenTable }
+const report = { date, startTime: '09:15', cutoffTime, cutoffExclusive: true, analyzed: rows.length, nifty50Analyzed: nifty50Rows.length, lastFiveAnalyzed: lastFiveRows.length, lastFifteenAnalyzed: lastFifteenRows.length, requested: symbols.length, volumeEligible: volumeEligible.length, skipped: skipped.length, minimumDepthMinutes, rules: { volumeUniverse: ignoreVolumeRank ? 'Volume rank ignored; every requested stock with usable candle and depth data is analyzed.' : 'Only stocks whose current average one-minute volume from 09:15 to cutoff ranks 1, 2, or 3 against the same window in the prior ten sessions.', nifty50Universe: ignoreVolumeRank ? 'Requested NIFTY 50 constituents with usable candle and depth data; volume rank is ignored by explicit override.' : 'NIFTY 50 constituents whose current average one-minute volume ranks 1, 2, or 3 against the same window in the prior ten sessions.', depthPersistence: 'At least 75% of observed minute-to-minute midpoint changes point in the side direction, with no move through the opening midpoint against that direction.' }, eligibleStocks, table, nifty50Table, lastFiveTable, lastFifteenTable }
 let suffix = 1, output
 if (args.json === 'true') {
   console.log(JSON.stringify(report))

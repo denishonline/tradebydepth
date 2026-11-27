@@ -166,10 +166,11 @@ async function setAnalysisCutoff(cutoffTime) {
 }
 
 function applyDirectionalSharesTable(payload) {
+  const nifty50Opening = elements.directionalShares?.querySelector('[data-window="nifty50-opening"]')
   const opening = elements.directionalShares?.querySelector('[data-window="opening"]')
   const lastFive = elements.directionalShares?.querySelector('[data-window="last-five"]')
   const lastFifteen = elements.directionalShares?.querySelector('[data-window="last-fifteen"]')
-  if (!opening || !lastFive || !lastFifteen) return
+  if (!nifty50Opening || !opening || !lastFive || !lastFifteen) return
   const progress = elements.directionalShares?.querySelector(".directional-progress")
   if (progress) progress.textContent = payload?.message || "Waiting for scan..."
   syncCutoffControl(payload)
@@ -180,17 +181,22 @@ function applyDirectionalSharesTable(payload) {
   }
   const data = payload?.data
   if (!data) {
+    paint(nifty50Opening, ["-", "-", "-"], "")
     paint(opening, ["-", "-", "-"], "")
     paint(lastFive, ["-", "-", "-"], "")
     paint(lastFifteen, ["-", "-", "-"], "")
     return
   }
   const direction = value => value > 0 ? "bullish" : value < 0 ? "bearish" : "neutral"
+  const nifty50Difference = Number.parseFloat(data.nifty50Difference)
   const openingDifference = Number.parseFloat(data.difference)
   const lastFiveDifference = Number.parseFloat(data.lastFiveDifference)
   const lastFifteenDifference = Number.parseFloat(data.lastFifteenDifference)
   const openingWindow = opening.querySelector("[data-opening-window]")
+  const nifty50OpeningWindow = nifty50Opening.querySelector("[data-nifty50-opening-window]")
+  if (nifty50OpeningWindow) nifty50OpeningWindow.textContent = `09:15–${data.cutoffTime || "now"}`
   if (openingWindow) openingWindow.textContent = `09:15–${data.cutoffTime || "now"}`
+  paint(nifty50Opening, [data.nifty50Bullish, data.nifty50Bearish, data.nifty50Difference], direction(nifty50Difference))
   paint(opening, [data.bullish, data.bearish, data.difference], direction(openingDifference))
   paint(lastFive, [data.lastFiveBullish, data.lastFiveBearish, data.lastFiveDifference], direction(lastFiveDifference))
   paint(lastFifteen, [data.lastFifteenBullish, data.lastFifteenBearish, data.lastFifteenDifference], direction(lastFifteenDifference))
