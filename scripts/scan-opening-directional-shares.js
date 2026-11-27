@@ -87,7 +87,7 @@ for (const [index, symbol] of symbols.entries()) {
   volumeEligible.push({ symbol, volumeRank, averageVolume: candle.averageVolume })
   const book = depth(symbol)
   if (!book) { skipped.push({ symbol, reason: 'incomplete depth' }); continue }
-  rows.push({ symbol, candle, lastFiveCandle: candleFeature(history, date, 5), lastFiveBook: book.recent5, lastFifteenCandle: candleFeature(history, date, 15), lastFifteenBook: book.recent15, volumeRank })
+  rows.push({ symbol, candle, book, lastFiveCandle: candleFeature(history, date, 5), lastFiveBook: book.recent5, lastFifteenCandle: candleFeature(history, date, 15), lastFifteenBook: book.recent15, volumeRank })
 }
 process.stdout.write('\r\x1b[2K')
 if (!rows.length) throw new Error('No volume-rank-eligible stocks have both candle data and at least ' + minimumDepthMinutes + ' observed depth minutes in this window.')
@@ -118,13 +118,46 @@ const lastFiveRows = rows.filter(row => row.lastFiveCandle?.candles >= 2 && row.
 const lastFiveTable = buildTable(lastFiveRows, 'lastFive')
 const lastFifteenRows = rows.filter(row => row.lastFifteenCandle?.candles >= 2 && row.lastFifteenBook)
 const lastFifteenTable = buildTable(lastFifteenRows, 'lastFifteen')
-const report = { date, startTime: '09:15', cutoffTime, cutoffExclusive: true, analyzed: rows.length, lastFiveAnalyzed: lastFiveRows.length, lastFifteenAnalyzed: lastFifteenRows.length, requested: symbols.length, volumeEligible: volumeEligible.length, skipped: skipped.length, minimumDepthMinutes, rules: { volumeUniverse: 'Only stocks whose current average one-minute volume from 09:15 to cutoff ranks 1, 2, or 3 against the same window in the prior ten sessions.', depthPersistence: 'At least 75% of observed minute-to-minute midpoint changes point in the side direction, with no move through the opening midpoint against that direction.' }, eligibleStocks: rows.map(row => ({ stock: row.symbol, volumeRank: row.volumeRank, averageVolume: row.candle.averageVolume })), table, lastFiveTable, lastFifteenTable }
+const eligibleStocks = rows
+  .map(row => ({ stock: row.symbol, volumeRank: row.volumeRank, averageVolume: row.candle.averageVolume }))
+  .sort((left, right) => left.volumeRank - right.volumeRank || right.averageVolume - left.averageVolume || left.stock.localeCompare(right.stock))
+const rowsBySymbol = new Map(rows.map(row => [row.symbol, row]))
+const classify = (bullish, bearish) => bullish ? 'BULLISH' : bearish ? 'BEARISH' : 'NEUTRAL'
+const signedPct = value => `${value > 0 ? '+' : ''}${value.toFixed(3)}%`
+const eligibleStocksTable = eligibleStocks.map(stock => {
+  const row = rowsBySymbol.get(stock.stock)
+  const priceReturn = row.candle.returnPct
+  const midpointReturn = row.book.midpointReturnPct
+  return {
+    Stock: stock.stock,
+    'Volume rank': stock.volumeRank,
+    'Average volume': +stock.averageVolume.toFixed(1),
+    'EMA structure': classify(row.candle.emaUp === true, row.candle.emaUp === false),
+    'Five-candle return': `${classify(priceReturn > 0, priceReturn < 0)} (${signedPct(priceReturn)})`,
+    'Price + midpoint': classify(priceReturn > 0 && midpointReturn > 0, priceReturn < 0 && midpointReturn < 0),
+    'Depth midpoint return': `${classify(midpointReturn > 0, midpointReturn < 0)} (${signedPct(midpointReturn)})`,
+    'Depth persistence': classify(row.book.bullPersistent === true, row.book.bearPersistent === true),
+  }
+})
+const windowSummary = (label, sourceTable) => {
+  const total = sourceTable.find(row => row.Behaviour === 'TOTAL (sum of differences)')
+  return { ...total, Behaviour: label }
+}
+const behaviourTable = [
+  ...table.filter(row => row.Behaviour !== 'AVERAGE SHARE / NET DIFFERENCE'),
+  windowSummary('15m', lastFifteenTable),
+  windowSummary('5m', lastFiveTable),
+]
+const report = { date, startTime: '09:15', cutoffTime, cutoffExclusive: true, analyzed: rows.length, lastFiveAnalyzed: lastFiveRows.length, lastFifteenAnalyzed: lastFifteenRows.length, requested: symbols.length, volumeEligible: volumeEligible.length, skipped: skipped.length, minimumDepthMinutes, rules: { volumeUniverse: 'Only stocks whose current average one-minute volume from 09:15 to cutoff ranks 1, 2, or 3 against the same window in the prior ten sessions.', depthPersistence: 'At least 75% of observed minute-to-minute midpoint changes point in the side direction, with no move through the opening midpoint against that direction.' }, eligibleStocks, table, lastFiveTable, lastFifteenTable }
 let suffix = 1, output
 if (args.json === 'true') {
   console.log(JSON.stringify(report))
 } else {
   do { output = path.join(root, 'reports', date + '-0915-to-' + cutoffTime.replace(':', '') + '-directional-shares' + (suffix === 1 ? '' : '-' + suffix) + '.json'); suffix++ } while (fs.existsSync(output))
   fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' })
-  console.table(table)
+  console.log('\nTop volume-ranked stocks included in analysis')
+  console.table(eligibleStocksTable)
+  console.log('\nBullish / bearish behaviour')
+  console.table(behaviourTable)
   console.log('Analyzed ' + rows.length + '/' + symbols.length + ' volume-rank-eligible stocks; cutoff is exclusive; saved ' + output)
 }

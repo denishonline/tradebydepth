@@ -65,9 +65,9 @@ async function directorySize(directory) {
   return sizes.reduce((total, size) => total + size, 0)
 }
 
-// Depth history is intentionally retained only for the latest five stored
+// Depth history is intentionally retained only for the latest ten stored
 // NSE sessions. Candle history is separate and is never touched here.
-async function pruneMarketDepthHistory(directory, keepSessions = 5) {
+async function pruneMarketDepthHistory(directory, keepSessions = 10) {
   let entries
   try {
     entries = await readdir(directory, { withFileTypes: true })
@@ -114,7 +114,7 @@ const depthHistory = await createMarketDepthHistory({
   directory: path.join(rootDirectory, "db", "cash-depth"),
 })
 const cashDepthDirectory = path.join(rootDirectory, "db", "cash-depth")
-const depthPrune = await pruneMarketDepthHistory(cashDepthDirectory, 5)
+const depthPrune = await pruneMarketDepthHistory(cashDepthDirectory, 10)
 if (depthPrune.removed.length)
   console.log(
     `Pruned market depth history: removed ${depthPrune.removed.length} old session(s); kept ${depthPrune.kept.join(", ")}`,
@@ -126,7 +126,7 @@ if (!depthOnlyMode) {
     throw new Error(history.status().error)
 }
 const depthRetentionTimer = setInterval(() => {
-  void pruneMarketDepthHistory(cashDepthDirectory, 5).catch((error) =>
+  void pruneMarketDepthHistory(cashDepthDirectory, 10).catch((error) =>
     console.error("Cannot prune market depth history:", error.message),
   )
 }, 10 * 60_000)
