@@ -87,14 +87,15 @@ for (const [index, symbol] of symbols.entries()) {
   if (!candle) { skipped.push({ symbol, reason: 'missing current candles' }); continue }
   const volumeRank = prior.length === 10 ? 1 + prior.filter(row => row.averageVolume > candle.averageVolume).length : null
   const mainEligible = ignoreVolumeRank || (prior.length === 10 && volumeRank <= 3)
-  if (!mainEligible) skipped.push({ symbol, reason: prior.length !== 10 ? 'fewer than ten prior volume windows' : 'today volume rank above 3', volumeRank })
+  const isNifty50 = nifty50Symbols.has(symbol)
+  const nifty50Eligible = isNifty50 && (ignoreVolumeRank || (prior.length === 10 && volumeRank <= 3))
+  if (!mainEligible && !nifty50Eligible) skipped.push({ symbol, reason: prior.length !== 10 ? 'fewer than ten prior volume windows' : 'today volume rank above 3', volumeRank })
   if (mainEligible) volumeEligible.push({ symbol, volumeRank, averageVolume: candle.averageVolume })
-  const nifty50Eligible = nifty50Symbols.has(symbol)
-  if (!mainEligible) continue
+  if (!mainEligible && !nifty50Eligible) continue
   const book = depth(symbol)
-  if (!book) { if (mainEligible) skipped.push({ symbol, reason: 'incomplete depth' }); continue }
+  if (!book) { skipped.push({ symbol, reason: 'incomplete depth' }); continue }
   const row = { symbol, candle, book, lastFiveCandle: candleFeature(history, date, 5), lastFiveBook: book.recent5, lastFifteenCandle: candleFeature(history, date, 15), lastFifteenBook: book.recent15, volumeRank }
-  rows.push(row)
+  if (mainEligible) rows.push(row)
   if (nifty50Eligible) nifty50Rows.push(row)
 }
 process.stdout.write('\r\x1b[2K')
@@ -130,10 +131,13 @@ const lastFifteenTable = buildTable(lastFifteenRows, 'lastFifteen')
 const eligibleStocks = rows
   .map(row => ({ stock: row.symbol, volumeRank: row.volumeRank, averageVolume: row.candle.averageVolume }))
   .sort((left, right) => (left.volumeRank ?? 0) - (right.volumeRank ?? 0) || right.averageVolume - left.averageVolume || left.stock.localeCompare(right.stock))
-const rowsBySymbol = new Map(rows.map(row => [row.symbol, row]))
+const nifty50Stocks = nifty50Rows
+  .map(row => ({ stock: row.symbol, volumeRank: row.volumeRank, averageVolume: row.candle.averageVolume }))
+  .sort((left, right) => (left.volumeRank ?? 0) - (right.volumeRank ?? 0) || right.averageVolume - left.averageVolume || left.stock.localeCompare(right.stock))
+const rowsBySymbol = new Map([...rows, ...nifty50Rows].map(row => [row.symbol, row]))
 const classify = (bullish, bearish) => bullish ? 'BULLISH' : bearish ? 'BEARISH' : 'NEUTRAL'
 const signedPct = value => `${value > 0 ? '+' : ''}${value.toFixed(3)}%`
-const eligibleStocksTable = eligibleStocks.map(stock => {
+const stockTableRow = stock => {
   const row = rowsBySymbol.get(stock.stock)
   const priceReturn = row.candle.returnPct
   const midpointReturn = row.book.midpointReturnPct
@@ -147,7 +151,9 @@ const eligibleStocksTable = eligibleStocks.map(stock => {
     'Depth midpoint return': `${classify(midpointReturn > 0, midpointReturn < 0)} (${signedPct(midpointReturn)})`,
     'Depth persistence': classify(row.book.bullPersistent === true, row.book.bearPersistent === true),
   }
-})
+}
+const nifty50StocksTable = nifty50Stocks.map(stockTableRow)
+const eligibleStocksTable = eligibleStocks.map(stockTableRow)
 const windowSummary = (label, sourceTable) => {
   const total = sourceTable.find(row => row.Behaviour === 'TOTAL (sum of differences)')
   return { Window: label, Bullish: total.Bullish, Bearish: total.Bearish, Difference: total.Difference }
@@ -165,6 +171,8 @@ if (args.json === 'true') {
 } else {
   do { output = path.join(root, 'reports', date + '-0915-to-' + cutoffTime.replace(':', '') + '-directional-shares' + (suffix === 1 ? '' : '-' + suffix) + '.json'); suffix++ } while (fs.existsSync(output))
   fs.writeFileSync(output, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' })
+  console.log('\nTop volume-ranked stocks included in analysis (Nifty50)')
+  console.table(nifty50StocksTable)
   console.log('\nTop volume-ranked stocks included in analysis')
   console.table(eligibleStocksTable)
   console.log('\nBullish / bearish behaviour')
